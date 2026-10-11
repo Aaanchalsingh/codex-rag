@@ -15,7 +15,7 @@ pinned: false
 
 ### Chat with your codebase using AI
 
-[![Live Demo](https://img.shields.io/badge/Live%20Demo-coming%20soon-blue?style=for-the-badge&logo=render)](https://codex-rag.onrender.com)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-codex--rag.onrender.com-brightgreen?style=for-the-badge&logo=render)](https://codex-rag.onrender.com)
 [![GitHub](https://img.shields.io/badge/GitHub-Aaanchalsingh%2Fcodex--rag-black?style=for-the-badge&logo=github)](https://github.com/Aaanchalsingh/codex-rag)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue?style=for-the-badge&logo=python)](https://python.org)
 [![Groq](https://img.shields.io/badge/LLM-Groq-orange?style=for-the-badge)](https://console.groq.com)
@@ -34,7 +34,7 @@ pinned: false
 
 ## 🚀 Live Demo
 
-🔗 **[codex-rag.onrender.com](https://codex-rag.onrender.com)** ← deploy link (update once live)
+🔗 **[codex-rag.onrender.com](https://codex-rag.onrender.com)**
 
 ---
 

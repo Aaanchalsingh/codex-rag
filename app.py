@@ -690,6 +690,8 @@ st.markdown(f"""
   <span>·</span>
   <span>© 2026 <strong>Aanchal Singh</strong></span>
   <span>·</span>
+  <a href="https://codex-rag.onrender.com" target="_blank">Live Demo</a>
+  <span>·</span>
   <a href="https://github.com/Aaanchalsingh/codex-rag" target="_blank">GitHub</a>
   <span>·</span>
   <span style="font-family:'JetBrains Mono',monospace;font-size:0.72rem;color:{C['text_muted']}">

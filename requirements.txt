@@ -1,8 +1,10 @@
 # LLM — Groq
 groq==0.11.0
 
-# Embeddings (local, free)
+# Embeddings (local, free) — CPU only to save RAM on free tier
 sentence-transformers==3.0.1
+torch==2.3.1+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
 
 # Vector store
 chromadb==0.5.5

@@ -400,10 +400,17 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Auto-index on cold start ──────────────────────────────────────────────────
-@st.cache_resource(show_spinner="⚡ Loading index…")
+@st.cache_resource(show_spinner=False)
 def load_indexer():
-    from startup import get_indexer
-    return get_indexer()
+    """Load indexer lazily — only called when user visits, not at boot time."""
+    try:
+        from startup import get_indexer
+        return get_indexer()
+    except Exception as e:
+        print(f"[app] load_indexer failed: {e}", flush=True)
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
@@ -521,11 +528,16 @@ with st.sidebar:
         else:
             st.warning("Nothing to clear.")
 
-    # Auto-load from startup.py (cold start)
+    # Auto-load index from startup.py (HF Spaces / Render cold start)
     if "indexer" not in st.session_state:
-        idx = load_indexer()
-        if idx and idx.chunk_count > 0:
-            st.session_state["indexer"] = idx
+        with st.spinner("⚡ Auto-indexing on startup…"):
+            try:
+                indexer = load_indexer()
+                if indexer and indexer.chunk_count > 0:
+                    st.session_state["indexer"] = indexer
+                    st.success(f"✅ Auto-indexed {indexer.chunk_count} chunks")
+            except Exception as e:
+                st.warning(f"Auto-index skipped: {e}")
 
     if "indexer" in st.session_state:
         st.metric("Chunks indexed", st.session_state["indexer"].chunk_count)

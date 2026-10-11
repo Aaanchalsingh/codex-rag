@@ -17,6 +17,8 @@ import logging
 import tempfile
 from pathlib import Path
 
+# Force INFO level so Render logs show indexing progress
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 _cached_indexer = None
@@ -44,30 +46,34 @@ def get_indexer():
         "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
     )
 
+    print(f"[startup] GITHUB_REPO_URL = '{github_url}'", flush=True)
+    print(f"[startup] CHROMA_IN_MEMORY = '{os.getenv('CHROMA_IN_MEMORY')}'", flush=True)
+
     # ── Option 1: Auto-index from GitHub ─────────────────────────────────────
     if github_url:
-        logger.info(f"Auto-indexing from GitHub: {github_url}")
+        print(f"[startup] Cloning {github_url}…", flush=True)
         try:
             import git
-
-            # Clone into a temp directory
             tmp_dir = tempfile.mkdtemp(prefix="codex_rag_")
-            logger.info(f"Cloning into {tmp_dir}…")
+            print(f"[startup] Cloning into {tmp_dir}", flush=True)
             git.Repo.clone_from(github_url, tmp_dir, depth=1)
+            print(f"[startup] Clone done. Parsing…", flush=True)
 
             indexer = CodebaseIndexer(
                 embedding_model=embedding_model,
-                in_memory=True,  # no disk needed on HF Spaces
+                in_memory=True,
             )
             chunks = parse_codebase(tmp_dir)
+            print(f"[startup] Parsed {len(chunks)} chunks. Embedding…", flush=True)
             n = indexer.index_chunks(chunks)
-            logger.info(f"Auto-indexed {n} chunks from {github_url}")
+            print(f"[startup] ✅ Indexed {n} chunks. Total: {indexer.chunk_count}", flush=True)
             _cached_indexer = indexer
             return _cached_indexer
 
         except Exception as e:
-            logger.error(f"Auto-index from GitHub failed: {e}")
-            # Fall through to local persistent index
+            print(f"[startup] ❌ Auto-index failed: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
 
     # ── Option 2: Load existing local persistent index ────────────────────────
     local_index = Path(chroma_path)

@@ -107,34 +107,48 @@ class CodeChunk:
 
 def _try_treesitter_parse(source_bytes: bytes, language: str) -> Optional[list]:
     """
-    Attempt to parse with tree-sitter. Returns list of (node_type, start_byte,
-    end_byte, start_line, end_line) tuples, or None if tree-sitter unavailable.
+    Attempt to parse with tree-sitter. Handles both 0.21.x and 0.23.x APIs.
+    Returns list of matching nodes, or None if tree-sitter unavailable.
     """
     try:
-        import tree_sitter_python as tspython
-        import tree_sitter_javascript as tsjavascript
-        import tree_sitter_typescript as tstypescript
-        import tree_sitter_java as tsjava
-        import tree_sitter_go as tsgo
-        import tree_sitter_rust as tsrust
-        import tree_sitter_cpp as tscpp
         from tree_sitter import Language, Parser
+        import tree_sitter
 
-        lang_module_map = {
-            "python": tspython.language(),
-            "javascript": tsjavascript.language(),
-            "typescript": tstypescript.language_typescript(),
-            "java": tsjava.language(),
-            "go": tsgo.language(),
-            "rust": tsrust.language(),
-            "cpp": tscpp.language(),
+        # Build language object — API differs between 0.21 and 0.23
+        ts_version = tuple(int(x) for x in tree_sitter.__version__.split(".")[:2])
+
+        def _get_lang(module_name: str, attr: Optional[str] = None):
+            import importlib
+            mod = importlib.import_module(module_name)
+            fn = getattr(mod, attr or "language")
+            raw = fn()
+            if ts_version >= (0, 22):
+                return Language(raw)
+            else:
+                # 0.21 requires Language(capsule, name) form
+                return Language(raw, module_name.replace("tree_sitter_", ""))
+
+        lang_builders = {
+            "python":     lambda: _get_lang("tree_sitter_python"),
+            "javascript": lambda: _get_lang("tree_sitter_javascript"),
+            "typescript": lambda: _get_lang("tree_sitter_typescript", "language_typescript"),
+            "java":       lambda: _get_lang("tree_sitter_java"),
+            "go":         lambda: _get_lang("tree_sitter_go"),
+            "rust":       lambda: _get_lang("tree_sitter_rust"),
+            "cpp":        lambda: _get_lang("tree_sitter_cpp"),
         }
 
-        if language not in lang_module_map:
+        if language not in lang_builders:
             return None
 
-        lang = Language(lang_module_map[language])
-        parser = Parser(lang)
+        lang = lang_builders[language]()
+
+        if ts_version >= (0, 22):
+            parser = Parser(lang)
+        else:
+            parser = Parser()
+            parser.set_language(lang)
+
         tree = parser.parse(source_bytes)
 
         target_types = set(CHUNK_NODE_TYPES.get(language, []))

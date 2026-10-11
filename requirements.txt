@@ -1,5 +1,5 @@
 # LLM — Groq
-groq==0.11.0
+groq==1.7.0
 
 # Vector store (only needed for sbert backend)
 chromadb==0.5.5

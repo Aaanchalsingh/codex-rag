@@ -81,7 +81,7 @@ class CodebaseQA:
         self.indexer = indexer
         self.top_k = top_k
         self.temperature = temperature
-        self.client = Groq(api_key=api_key)
+        self.client = Groq(api_key=api_key, http_client=None)
 
         # Allow env override of model list
         env_models = os.getenv("GROQ_MODELS")

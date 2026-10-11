@@ -10,7 +10,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
-
 logging.basicConfig(level=logging.WARNING)
 
 # ── Page config ───────────────────────────────────────────────────────────────
@@ -21,32 +20,43 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
+# ── Auto-index on cold start (HF Spaces / first load) ────────────────────────
+@st.cache_resource(show_spinner="Loading index…")
+def load_indexer():
+    from startup import get_indexer
+    return get_indexer()
+
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.title("🔍 Codex RAG")
     st.caption("Chat with your codebase")
     st.divider()
 
-    # API key
     api_key = st.text_input(
         "Groq API Key",
         value=os.getenv("GROQ_API_KEY", ""),
         type="password",
-        help="Get a free key at https://console.groq.com",
+        help="Free at https://console.groq.com",
     )
 
-    # Codebase path
     codebase_path = st.text_input(
         "Codebase Path",
         value=os.getenv("CODEBASE_PATH", ""),
         placeholder="/path/to/your/project",
-        help="Absolute or relative path to the codebase directory.",
+        help="Local path to index manually.",
+    )
+
+    github_url = st.text_input(
+        "GitHub Repo URL (optional)",
+        value=os.getenv("GITHUB_REPO_URL", ""),
+        placeholder="https://github.com/user/repo",
+        help="Auto-clone and index this repo.",
     )
 
     chroma_path = st.text_input(
         "ChromaDB Path",
         value=os.getenv("CHROMA_DB_PATH", "./data/chroma_db"),
-        help="Where the vector index is stored.",
     )
 
     embedding_model = st.selectbox(
@@ -54,70 +64,76 @@ with st.sidebar:
         options=[
             "sentence-transformers/all-MiniLM-L6-v2",
             "sentence-transformers/all-mpnet-base-v2",
-            "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         ],
         index=0,
-        help="Local embedding model — no API needed.",
     )
 
     top_k = st.slider("Retrieved chunks (top-k)", min_value=3, max_value=12, value=6)
 
     st.divider()
-
-    # Model chain info
     st.markdown(
         "**Model fallback chain**\n"
-        "1. `openai/gpt-oss-120b` — best quality\n"
-        "2. `openai/gpt-oss-20b` — fastest\n"
-        "3. `qwen/qwen3.8-27b` — fallback\n\n"
+        "1. `openai/gpt-oss-120b`\n"
+        "2. `openai/gpt-oss-20b`\n"
+        "3. `qwen/qwen3.8-27b`\n\n"
         "_Auto-skips decommissioned models._"
     )
-
     st.divider()
 
-    # Index button
-    if st.button("⚡ Index Codebase", use_container_width=True, type="primary"):
-        if not codebase_path:
-            st.error("Please enter a codebase path first.")
-        elif not Path(codebase_path).exists():
-            st.error(f"Path does not exist: `{codebase_path}`")
+    # ── Index controls ────────────────────────────────────────────────────────
+    col1, col2 = st.columns(2)
+
+    if col1.button("⚡ Index", use_container_width=True, type="primary"):
+        target = github_url.strip() or codebase_path.strip()
+        if not target:
+            st.error("Enter a codebase path or GitHub URL.")
         else:
-            with st.spinner("Parsing & indexing codebase…"):
+            with st.spinner("Indexing…"):
                 try:
                     from src.parser import parse_codebase
                     from src.indexer import CodebaseIndexer
+                    import tempfile
 
-                    chunks = parse_codebase(codebase_path)
+                    use_memory = bool(github_url.strip())
+
+                    if github_url.strip():
+                        import git
+                        tmp = tempfile.mkdtemp(prefix="codex_rag_")
+                        git.Repo.clone_from(github_url.strip(), tmp, depth=1)
+                        target_path = tmp
+                    else:
+                        target_path = codebase_path.strip()
+                        if not Path(target_path).exists():
+                            st.error(f"Path not found: `{target_path}`")
+                            st.stop()
+
+                    chunks = parse_codebase(target_path)
                     indexer = CodebaseIndexer(
                         chroma_path=chroma_path,
                         embedding_model=embedding_model,
+                        in_memory=use_memory,
                     )
                     n = indexer.index_chunks(chunks)
                     st.session_state["indexer"] = indexer
-                    st.success(f"✅ Indexed {n} new chunks ({indexer.chunk_count} total)")
+                    st.success(f"✅ {n} new chunks ({indexer.chunk_count} total)")
                 except Exception as e:
                     st.error(f"Indexing failed: {e}")
 
-    # Index stats
-    if "indexer" in st.session_state:
-        idx = st.session_state["indexer"]
-        st.metric("Chunks in index", idx.chunk_count)
-
-    if st.button("🗑️ Clear Index", use_container_width=True):
+    if col2.button("🗑️ Clear", use_container_width=True):
         if "indexer" in st.session_state:
             st.session_state["indexer"].clear()
-            st.success("Index cleared.")
+            st.success("Cleared.")
         else:
             st.warning("No index loaded.")
 
-    st.divider()
-    st.markdown(
-        "**How to use**\n"
-        "1. Paste your Groq API key\n"
-        "2. Enter path to your codebase\n"
-        "3. Click **⚡ Index Codebase**\n"
-        "4. Ask questions below"
-    )
+    # Auto-load index from startup.py (HF Spaces cold start)
+    if "indexer" not in st.session_state:
+        indexer = load_indexer()
+        if indexer and indexer.chunk_count > 0:
+            st.session_state["indexer"] = indexer
+
+    if "indexer" in st.session_state:
+        st.metric("Chunks in index", st.session_state["indexer"].chunk_count)
 
 
 # ── Main chat area ────────────────────────────────────────────────────────────
@@ -126,12 +142,12 @@ st.title("💬 Chat with your Codebase")
 if "messages" not in st.session_state:
     st.session_state["messages"] = []
 
-# Render chat history
+# Render history
 for msg in st.session_state["messages"]:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sources"):
-            with st.expander(f"📂 {len(msg['sources'])} source(s) · via `{msg.get('model', '?')}`"):
+            with st.expander(f"📂 {len(msg['sources'])} source(s) · `{msg.get('model', '?')}`"):
                 for src in msg["sources"]:
                     st.markdown(
                         f"- **{src.get('chunk_type', 'code')}** `{src.get('name', '?')}` "
@@ -139,7 +155,7 @@ for msg in st.session_state["messages"]:
                         f"lines {src.get('start_line')}–{src.get('end_line')}"
                     )
 
-# Example prompts when chat is empty
+# Example prompts
 if not st.session_state["messages"]:
     st.markdown("### Try asking:")
     examples = [
@@ -148,18 +164,17 @@ if not st.session_state["messages"]:
         "What algorithms are implemented here?",
         "How is state managed across the app?",
         "What does the useGemini hook do?",
-        "How is the DiagramViewer component structured?",
+        "How is the DiagramViewer structured?",
     ]
     cols = st.columns(2)
     for i, q in enumerate(examples):
-        if cols[i % 2].button(q, key=f"example_{i}", use_container_width=True):
+        if cols[i % 2].button(q, key=f"ex_{i}", use_container_width=True):
             st.session_state["pending_question"] = q
             st.rerun()
 
-# Handle example button clicks
 if "pending_question" in st.session_state:
-    question = st.session_state.pop("pending_question")
-    st.session_state["messages"].append({"role": "user", "content": question})
+    q = st.session_state.pop("pending_question")
+    st.session_state["messages"].append({"role": "user", "content": q})
     st.rerun()
 
 # Chat input
@@ -171,21 +186,20 @@ if question := st.chat_input("Ask anything about your codebase…"):
 
     with st.chat_message("assistant"):
         if not api_key:
-            answer = "⚠️ Please enter your Groq API key in the sidebar."
-            st.warning(answer)
-            st.session_state["messages"].append({"role": "assistant", "content": answer})
+            msg = "⚠️ Please enter your Groq API key in the sidebar."
+            st.warning(msg)
+            st.session_state["messages"].append({"role": "assistant", "content": msg})
 
         elif "indexer" not in st.session_state:
-            answer = "⚠️ Codebase not indexed yet. Enter a path and click **⚡ Index Codebase**."
-            st.warning(answer)
-            st.session_state["messages"].append({"role": "assistant", "content": answer})
+            msg = "⚠️ No index loaded. Enter a path or GitHub URL and click **⚡ Index**."
+            st.warning(msg)
+            st.session_state["messages"].append({"role": "assistant", "content": msg})
 
         else:
             with st.spinner("Searching codebase…"):
                 try:
                     from src.qa_chain import CodebaseQA
 
-                    # Cache QA chain — rebuild only if key or top_k changes
                     cache_key = f"qa_{api_key[:8]}_{top_k}"
                     if st.session_state.get("qa_cache_key") != cache_key:
                         st.session_state["qa"] = CodebaseQA(
@@ -201,7 +215,7 @@ if question := st.chat_input("Ask anything about your codebase…"):
                     model_used = result.get("model", "unknown")
 
                     st.markdown(answer)
-                    st.caption(f"🤖 Answered by `{model_used}`")
+                    st.caption(f"🤖 `{model_used}`")
 
                     if sources:
                         with st.expander(f"📂 {len(sources)} source(s) used"):

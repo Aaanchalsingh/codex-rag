@@ -1,6 +1,11 @@
 """
 Indexer: embeds CodeChunks with sentence-transformers and stores them in ChromaDB.
-Supports incremental re-indexing (skips already-indexed chunks by ID).
+
+Two modes:
+- Local (default): PersistentClient — index survives restarts, good for local dev.
+- In-memory: EphemeralClient — no disk needed, used on HF Spaces / serverless deploy.
+
+Set CHROMA_IN_MEMORY=true in env to force in-memory mode.
 """
 
 import os
@@ -21,15 +26,10 @@ COLLECTION_NAME = "codebase"
 
 
 def _chunk_to_document(chunk: CodeChunk) -> str:
-    """
-    Build the text that gets embedded. Including the summary header gives the
-    model useful context about what the chunk is.
-    """
     return f"{chunk.summary}\n\n{chunk.content}"
 
 
 def _stable_id(chunk: CodeChunk) -> str:
-    """Deterministic ID based on file path + name + content hash."""
     content_hash = hashlib.md5(chunk.content.encode()).hexdigest()[:8]
     raw = f"{chunk.file_path}::{chunk.name}::{content_hash}"
     return hashlib.md5(raw.encode()).hexdigest()
@@ -40,23 +40,36 @@ class CodebaseIndexer:
         self,
         chroma_path: str = "./data/chroma_db",
         embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
+        in_memory: bool = False,
     ):
-        self.chroma_path = str(Path(chroma_path).resolve())
-        Path(self.chroma_path).mkdir(parents=True, exist_ok=True)
+        self.embedding_model_name = embedding_model
+
+        # Respect env override
+        force_memory = os.getenv("CHROMA_IN_MEMORY", "").lower() in ("true", "1", "yes")
+        use_memory = in_memory or force_memory
 
         logger.info(f"Loading embedding model: {embedding_model}")
         self.embedder = SentenceTransformer(embedding_model)
 
-        self.client = chromadb.PersistentClient(
-            path=self.chroma_path,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        if use_memory:
+            logger.info("ChromaDB: using in-memory client (ephemeral)")
+            self.client = chromadb.EphemeralClient(
+                settings=Settings(anonymized_telemetry=False)
+            )
+        else:
+            self.chroma_path = str(Path(chroma_path).resolve())
+            Path(self.chroma_path).mkdir(parents=True, exist_ok=True)
+            logger.info(f"ChromaDB: persistent client at {self.chroma_path}")
+            self.client = chromadb.PersistentClient(
+                path=self.chroma_path,
+                settings=Settings(anonymized_telemetry=False),
+            )
+
         self.collection = self.client.get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
-        logger.info(f"ChromaDB ready at {self.chroma_path} — "
-                    f"{self.collection.count()} existing chunks")
+        logger.info(f"Collection ready — {self.collection.count()} existing chunks")
 
     def index_chunks(
         self,
@@ -64,27 +77,19 @@ class CodebaseIndexer:
         batch_size: int = 64,
         force_reindex: bool = False,
     ) -> int:
-        """
-        Embed and store chunks. Skips chunks already in the DB unless force_reindex=True.
-        Returns the number of newly indexed chunks.
-        """
         if not chunks:
             logger.warning("No chunks to index.")
             return 0
 
-        # Build IDs for all chunks
         ids = [_stable_id(c) for c in chunks]
 
         if not force_reindex:
-            # Check which IDs already exist
             existing = self.collection.get(ids=ids, include=[])["ids"]
             existing_set = set(existing)
             new_pairs = [(i, c) for i, c in zip(ids, chunks) if i not in existing_set]
-            logger.info(f"{len(existing_set)} chunks already indexed, "
-                        f"{len(new_pairs)} new chunks to add.")
+            logger.info(f"{len(existing_set)} already indexed, {len(new_pairs)} new.")
         else:
             new_pairs = list(zip(ids, chunks))
-            logger.info(f"Force re-indexing {len(new_pairs)} chunks.")
 
         if not new_pairs:
             return 0
@@ -116,16 +121,13 @@ class CodebaseIndexer:
                 metadatas=metadatas,
             )
             indexed += len(batch)
-            logger.info(f"Indexed batch {start // batch_size + 1}: "
-                        f"{indexed}/{len(new_pairs)} chunks")
 
         return indexed
 
     def query(self, question: str, top_k: int = 6) -> list[dict]:
-        """
-        Embed the question and retrieve the top_k most relevant chunks.
-        Returns list of dicts with 'document', 'metadata', 'distance'.
-        """
+        if self.collection.count() == 0:
+            return []
+
         embedding = self.embedder.encode([question]).tolist()
         results = self.collection.query(
             query_embeddings=embedding,
@@ -144,13 +146,11 @@ class CodebaseIndexer:
         return hits
 
     def clear(self):
-        """Delete all indexed chunks."""
         self.client.delete_collection(COLLECTION_NAME)
         self.collection = self.client.get_or_create_collection(
             name=COLLECTION_NAME,
             metadata={"hnsw:space": "cosine"},
         )
-        logger.info("Index cleared.")
 
     @property
     def chunk_count(self) -> int:

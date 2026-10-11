@@ -49,7 +49,7 @@ class CodebaseIndexer:
         use_memory = in_memory or force_memory
 
         logger.info(f"Loading embedding model: {embedding_model}")
-        self.embedder = SentenceTransformer(embedding_model)
+        self.embedder = SentenceTransformer(embedding_model, device="cpu")
 
         if use_memory:
             logger.info("ChromaDB: using in-memory client (ephemeral)")

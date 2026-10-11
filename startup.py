@@ -64,8 +64,8 @@ def get_indexer():
                 in_memory=True,
             )
             chunks = parse_codebase(tmp_dir)
-            print(f"[startup] Parsed {len(chunks)} chunks. Embedding…", flush=True)
-            n = indexer.index_chunks(chunks)
+            print(f"[startup] Parsed {len(chunks)} chunks. Embedding in batches…", flush=True)
+            n = indexer.index_chunks(chunks, batch_size=16)  # smaller batches = less peak RAM
             print(f"[startup] ✅ Indexed {n} chunks. Total: {indexer.chunk_count}", flush=True)
             _cached_indexer = indexer
             return _cached_indexer

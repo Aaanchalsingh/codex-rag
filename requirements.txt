@@ -1,15 +1,13 @@
 # LLM — Groq
 groq==0.11.0
 
-# Embeddings (local, free) — CPU only to save RAM on free tier
-sentence-transformers==3.0.1
-torch==2.3.1+cpu
---extra-index-url https://download.pytorch.org/whl/cpu
-
-# Vector store
+# Vector store (only needed for sbert backend)
 chromadb==0.5.5
 
-# Code parsing (tree-sitter; language packages auto-matched)
+# Embeddings — optional, only needed if EMBEDDING_BACKEND=sbert
+# sentence-transformers==3.0.1
+
+# Code parsing
 tree-sitter>=0.21.3,<0.24.0
 tree-sitter-python>=0.21.0
 tree-sitter-javascript>=0.21.0
